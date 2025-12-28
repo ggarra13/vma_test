@@ -69,11 +69,23 @@ int main() {
     GLFWwindow* window = glfwCreateWindow(800, 600, "VMA Triangle Demo", nullptr, nullptr);
 
     // 1. Instance
-    uint32_t extCount = 0;
-    const char** exts = glfwGetRequiredInstanceExtensions(&extCount);
+    uint32_t glfwExtCount = 0;
+    const char** glfwExts = glfwGetRequiredInstanceExtensions(&glfwExtCount);
+
+    // Build a final list of extensions
+    std::vector<const char*> instanceExtensions(glfwExts, glfwExts + glfwExtCount);
+
+    // macOS/MoltenVK compatibility:
+    instanceExtensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+
+    // Optional: also adds support for getting physical device properties (required by some VMA versions)
+    instanceExtensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+
     VkInstanceCreateInfo instanceCI{ VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
-    instanceCI.enabledExtensionCount = extCount;
-    instanceCI.ppEnabledExtensionNames = exts;
+    instanceCI.enabledExtensionCount = static_cast<uint32_t>(instanceExtensions.size());
+    instanceCI.ppEnabledExtensionNames = instanceExtensions.data();
+    instanceCI.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+    
     VkInstance instance;
     vkCreateInstance(&instanceCI, nullptr, &instance);
 
@@ -94,14 +106,49 @@ int main() {
     qci.queueCount = 1;
     qci.pQueuePriorities = &priority;
 
-    const char* deviceExts[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+    // --- Logical Device Extensions ---
+    // 1. Define the extension name manually if your headers are old
+#ifndef VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME
+#define VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME "VK_KHR_portability_subset"
+#endif
+    
+    std::vector<const char*> deviceExtensions = {
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME
+    };
+    
+    // Check for Portability Subset support
+    uint32_t deviceExtCount = 0;
+    vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &deviceExtCount, nullptr);
+    std::vector<VkExtensionProperties> availableDeviceExts(deviceExtCount);
+    vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &deviceExtCount, availableDeviceExts.data());
+
+    bool portabilityRequired = false;
+    for (const auto& ext : availableDeviceExts) {
+        if (std::strcmp(ext.extensionName, VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME) == 0) {
+            deviceExtensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+            portabilityRequired = true;
+            break;
+        }
+    }
+    
+    if (portabilityRequired)
+    {
+        std::cout << "Added mandatory macOS extension: " << VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME << std::endl;
+    }
+    else
+    {
+        std::cout << "Missing mandatory macOS extension: " << VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME << std::endl;
+    }
+
     VkDeviceCreateInfo dci{ VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
     dci.queueCreateInfoCount = 1;
     dci.pQueueCreateInfos = &qci;
-    dci.enabledExtensionCount = 1;
-    dci.ppEnabledExtensionNames = deviceExts;
+    dci.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
+    dci.ppEnabledExtensionNames = deviceExtensions.data();
+
     VkDevice device;
     vkCreateDevice(physicalDevice, &dci, nullptr, &device);
+
     VkQueue queue;
     vkGetDeviceQueue(device, queueFamily, 0, &queue);
 
